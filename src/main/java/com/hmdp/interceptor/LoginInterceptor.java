@@ -30,11 +30,11 @@ public class LoginInterceptor implements HandlerInterceptor {
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
 //        User user = (User) request.getSession().getAttribute("user");
-        if (UserHolder.getUser() == null) {
-            response.setStatus(401);
-            System.out.println("拦截请求 " + request.getRequestURI());
-            return false;
-        }
+//        if (UserHolder.getUser() == null) {
+//            response.setStatus(401);
+//            System.out.println("拦截请求 " + request.getRequestURI());
+//            return false;
+//        }
         System.out.println("放行请求 " + request.getRequestURI());
         return true;
     }

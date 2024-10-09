@@ -37,7 +37,7 @@ public class ShopController {
     @GetMapping("/{id}")
     public Result queryShopById(@PathVariable("id") Long id) throws InvocationTargetException, InstantiationException, IllegalAccessException, NoSuchMethodException {
         log.info("根据id查询店铺.");
-        Shop shop = shopService.getByIdRedis(id);
+        Shop shop = shopService.getByIdRedisWithLogicExpire(id);
         if (shop == null) {
             return Result.fail("店铺不存在！");
         }
@@ -65,8 +65,7 @@ public class ShopController {
     @PutMapping
     public Result updateShop(@RequestBody Shop shop) {
         // 写入数据库
-        shopService.updateById(shop);
-        return Result.ok();
+        return shopService.updateByIdRedis(shop);
     }
 
     /**
