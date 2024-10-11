@@ -70,7 +70,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
                         .ignoreNullValue().
                         setFieldValueEditor((fieldName, fieldValue) -> fieldValue.toString()));
         stringRedisTemplate.opsForHash().putAll(RedisConstants.LOGIN_USER_KEY + token, userMap);
-        stringRedisTemplate.expire(RedisConstants.LOGIN_USER_KEY, RedisConstants.LOGIN_USER_TTL, TimeUnit.SECONDS);
+        // 便于测试
+        stringRedisTemplate.expire(RedisConstants.LOGIN_USER_KEY, RedisConstants.LOGIN_USER_TTL + 10000000L, TimeUnit.SECONDS);
         return Result.ok(token);
     }
 }

@@ -7,6 +7,7 @@ import com.hmdp.service.IUserService;
 import com.hmdp.service.impl.UserServiceImpl;
 import com.hmdp.utils.RedisConstants;
 import com.hmdp.utils.UserHolder;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -19,6 +20,7 @@ import javax.servlet.http.HttpServletResponse;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+@Slf4j
 @Component
 public class LoginInterceptor implements HandlerInterceptor {
     private final StringRedisTemplate stringRedisTemplate;
@@ -29,13 +31,13 @@ public class LoginInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
-//        User user = (User) request.getSession().getAttribute("user");
-//        if (UserHolder.getUser() == null) {
-//            response.setStatus(401);
-//            System.out.println("拦截请求 " + request.getRequestURI());
-//            return false;
-//        }
-        System.out.println("放行请求 " + request.getRequestURI());
+        User user = (User) request.getSession().getAttribute("user");
+        if (UserHolder.getUser() == null) {
+            response.setStatus(401);
+            log.info("拦截请求 " + request.getRequestURI());
+            return false;
+        }
+        log.info("放行请求 " + request.getRequestURI());
         return true;
     }
 }
