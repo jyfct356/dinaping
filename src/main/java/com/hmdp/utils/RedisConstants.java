@@ -24,4 +24,5 @@ public class RedisConstants {
 
     public static final String LOCK_USER_SECKILL_KEY = "user:seckill";
     public static final Long LOCK_USER_SECKILL_TTL = 10L;
+    public static final Long LOCK_USER_SECKILL_RETRY_TTL = 5L;
 }
