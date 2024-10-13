@@ -16,12 +16,20 @@ import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.aop.framework.AopContext;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import javax.annotation.PostConstruct;
 import java.time.LocalDateTime;
-import java.util.concurrent.TimeUnit;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.concurrent.*;
 
 /**
  * <p>
@@ -43,6 +51,60 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     private StringRedisTemplate stringRedisTemplate;
     @Autowired
     private RedissonClient redissonClient;
+    private static DefaultRedisScript<Long> seckillScript;
+    static {
+        seckillScript = new DefaultRedisScript();
+        seckillScript.setResultType(Long.class);
+        seckillScript.setLocation(new ClassPathResource("seckill.lua"));
+    }
+    private BlockingQueue<VoucherOrder> orderTasks = new ArrayBlockingQueue<>(1024 * 1024);
+
+    private static final ExecutorService executor = Executors.newSingleThreadExecutor();
+
+    private IVoucherOrderService proxy;
+
+
+    @PostConstruct
+    void init() {
+        log.info("提交handler.");
+        executor.submit(new VoucherOrderHandler());
+    }
+
+    public class VoucherOrderHandler implements Runnable {
+        @Override
+        public void run() {
+            while (true) {
+                try {
+                    VoucherOrder voucherOrder = orderTasks.take();
+                    log.info("取出订单并生成.");
+                    proxy.createVoucherOrder(voucherOrder);
+//                    handleVoucherOrder(voucherOrder);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+
+            }
+        }
+
+    }
+
+
+    public void handleVoucherOrder(VoucherOrder voucherOrder) {
+        String keySuffix = UserHolder.getUser().getId().toString() + ":" + voucherOrder.getVoucherId();
+        RLock lock = redissonClient.getLock(RedisConstants.LOCK_USER_SECKILL_KEY + keySuffix);
+        try {
+            boolean suc = lock.tryLock(RedisConstants.LOCK_USER_SECKILL_RETRY_TTL, RedisConstants.LOCK_USER_SECKILL_TTL, TimeUnit.SECONDS);
+            if (!suc) {
+                log.error("不允许重复下单.");
+            }
+            log.info("准备生成订单.");
+            proxy.createVoucherOrder(voucherOrder);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        } finally {
+            lock.unlock();
+        }
+    }
 
     @Override
     public Result buySeckillVoucher(Long voucherId) {
@@ -58,7 +120,33 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 //            return Result.fail("库存不足.");
 //        }
         // TODO 在redis完成秒杀资格判断和预下单
+        Long userId = UserHolder.getUser().getId();
+        List<String> keyList = new ArrayList();
+        keyList.add(RedisConstants.SECKILL_STOCK_KEY);
+        keyList.add(RedisConstants.SECKILL_ORDER_KEY);
+        keyList.add(RedisConstants.SECKILL_BEGINTIME_KEY);
+        keyList.add(RedisConstants.SECKILL_ENDTIME_KEY);
+        Long result = stringRedisTemplate.execute(seckillScript,
+                keyList, userId.toString(), voucherId.toString(), String.valueOf(LocalDateTime.now().toInstant(ZoneOffset.UTC).toEpochMilli()));
+        if (result == 1) {
+            log.error("不在秒杀时间.");
+            return  Result.fail("不在秒杀时间.");
+        } else if (result == 2) {
+            log.error(("用户重复下单."));
+            return Result.fail("用户重复下单.");
+        } else if (result == 3) {
+            log.error("库存不足.");
+            return Result.fail("库存不足.");
+        }
 
+        // TODO 保存到消息队列
+        VoucherOrder voucherOrder = new VoucherOrder();
+        voucherOrder.setUserId(userId);
+        voucherOrder.setVoucherId(voucherId);
+        voucherOrder.setId(redisClient.nextId(RedisConstants.SECKILL_GEN_ID_KEY));
+        orderTasks.add(voucherOrder);
+        proxy  = (IVoucherOrderService) AopContext.currentProxy();
+        return Result.ok(voucherOrder.getId());
 
 //        // synchronized 锁不住后端集群
 //        synchronized (UserHolder.getUser().getId().toString().intern()) {
@@ -81,19 +169,16 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 //        } finally {
 //            lock.unlock();
 //        }
-        // TODO 开启异步线程完成订单生产
-
-
-
     }
 
     @Transactional
-    public Result createVoucherOrder(Long voucherId) {
+    public void createVoucherOrder(VoucherOrder voucherOrder) {
+        log.info("开始生成订单.");
         // 一人一单
-        int count = query().eq("voucher_id",voucherId).eq("user_id", UserHolder.getUser().getId()).count();
+        Long voucherId = voucherOrder.getVoucherId();
+        int count = query().eq("voucher_id",voucherId).eq("user_id", voucherOrder.getUserId()).count();
         if (count > 0) {
             log.info("用户已经到达下单上限.");
-            return Result.fail("用户已经到达下单上限.");
         }
         // 扣减库存
         boolean buySeccuss = seckillVoucherService.update()
@@ -102,16 +187,10 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
                 .gt("stock", 0)
                 .update();
         if (!buySeccuss) {
-            return Result.fail("扣库存失败.");
+            log.error("扣库存失败.");
         }
         //下单
-        VoucherOrder voucherOrder = new VoucherOrder();
-        voucherOrder.setVoucherId(voucherId);
-        voucherOrder.setId(redisClient.nextId(RedisConstants.SECKILL_GEN_ID_KEY));
-        voucherOrder.setUserId(UserHolder.getUser().getId());
         save(voucherOrder);
         log.info("下单成功.");
-        //返回订单id
-        return Result.ok(voucherOrder.getId());
     }
 }
