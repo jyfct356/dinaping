@@ -22,4 +22,6 @@ public interface IShopService extends IService<Shop> {
     Result updateByIdRedis(Shop shop);
 
     Shop getByIdRedisWithLogicExpire(Long id) throws InstantiationException, IllegalAccessException, InvocationTargetException, NoSuchMethodException;
+
+    Result queryShopByType(Integer typeId, Integer current, Double x, Double y);
 }
