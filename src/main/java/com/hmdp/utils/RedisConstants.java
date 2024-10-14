@@ -30,5 +30,7 @@ public class RedisConstants {
     public static final Long LOCK_USER_SECKILL_TTL = 10L;
     public static final Long LOCK_USER_SECKILL_RETRY_TTL = 5L;
 
+    public static final String FOLLOWER_KEY = "follower:";
+
 
 }
