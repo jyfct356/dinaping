@@ -108,5 +108,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         int count = 0;
         // TODO 实现连续签到逻辑
 
+        return Result.ok();
+
     }
 }
