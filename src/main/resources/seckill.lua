@@ -13,9 +13,9 @@ if (tonumber(redis.call("get", beginTimeMillsKey)) > tonumber(currentTimeMills) 
     return 1;
 end
 -- 重复下单
-if (tonumber(redis.call("sismember", orderKey, userId)) == 1) then
-    return 2;
-end
+--if (tonumber(redis.call("sismember", orderKey, userId)) == 1) then
+--    return 2;
+--end
 -- 库存
 if (tonumber(redis.call("get", stockKey)) <= 0) then
     return 3;

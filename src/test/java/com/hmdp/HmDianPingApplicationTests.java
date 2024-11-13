@@ -6,6 +6,9 @@ import com.hmdp.utils.RedisClient;
 import com.hmdp.utils.RedisConstants;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.amqp.rabbit.listener.RabbitListenerEndpointRegistry;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.geo.Point;
@@ -71,6 +74,31 @@ public class HmDianPingApplicationTests {
             stringRedisTemplate.opsForGeo().add(key, locations);
         }
 
+    }
+
+    @Autowired
+    private RabbitTemplate rabbitTemplate;
+    @Autowired
+    private RabbitListenerEndpointRegistry rabbitListenerEndpointRegistry;
+
+    @Test
+    public void testRabbitMQ() {
+        String queueName = "dianping.seckill";
+        for (int i = 0; i < 100000; i++) {
+            String msg = "hello world";
+//            System.out.println(rabbitListenerEndpointRegistry.getListenerContainerIds());
+            rabbitTemplate.convertAndSend(queueName, msg);
+        }
+        try {
+            Thread.sleep(100000);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @RabbitListener(id = "hahah", queues = "dianping.seckill")
+    public void receiveMessage(String message) {
+        System.out.println(message);
     }
 
 }

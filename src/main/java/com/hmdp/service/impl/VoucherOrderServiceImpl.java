@@ -12,14 +12,22 @@ import com.hmdp.utils.RedisConstants;
 import com.hmdp.utils.SimpleDistributeLock;
 import com.hmdp.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.tomcat.jni.Time;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
+import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.amqp.rabbit.listener.MessageListenerContainer;
+import org.springframework.amqp.rabbit.listener.RabbitListenerEndpointRegistry;
 import org.springframework.aop.framework.AopContext;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.event.ContextRefreshedEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.script.RedisScript;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -64,29 +72,62 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     private IVoucherOrderService proxy;
 
 
-    @PostConstruct
-    void init() {
-        log.info("提交handler.");
+
+
+    @Autowired
+    private RabbitTemplate rabbitTemplate;
+
+    @Autowired
+    private RabbitListenerEndpointRegistry registry;
+
+
+    @RabbitListener(id = "orderGenerator", queues = "dianping.seckill", autoStartup = "false")
+    public void orderGenerator(VoucherOrder voucherOrder) {
+        log.info("generator work " + voucherOrder);
+//        proxy.createVoucherOrder(voucherOrder);
+    }
+
+    @EventListener
+    public void onApplicationEvent(ContextRefreshedEvent event) {
+        proxy  = (IVoucherOrderService) AopContext.currentProxy();
+        // 应用启动完成后执行的逻辑
+        log.info("启动异步handler.");
         executor.submit(new VoucherOrderHandler());
     }
+
+//    @PostConstruct
+//    void init() {
+//        log.info("启动异步handler.");
+//        log.info("" + registry.getListenerContainerIds());
+//        MessageListenerContainer container = registry.getListenerContainer("orderGenerator");
+//        if (container != null) {
+//            container.start();
+//        } else {
+//            log.error("Listener - seckill.handler is null");
+//        }
+////        executor.submit(new VoucherOrderHandler());
+//    }
 
     public class VoucherOrderHandler implements Runnable {
         @Override
         public void run() {
-            while (true) {
-                try {
-                    VoucherOrder voucherOrder = orderTasks.take();
-                    log.info("取出订单并生成.");
-                    proxy.createVoucherOrder(voucherOrder);
-//                    handleVoucherOrder(voucherOrder);
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                }
-
+            try {
+                Thread.sleep(10000);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+            log.info("async handler run...");
+            MessageListenerContainer container = registry.getListenerContainer("orderGenerator");
+            if (container != null) {
+                container.start();
+                log.info("orderGenrator started now...");
+            } else {
+                log.error("Listener - seckill.handler is null");
             }
         }
 
     }
+
 
 
     public void handleVoucherOrder(VoucherOrder voucherOrder) {
@@ -144,8 +185,10 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         voucherOrder.setUserId(userId);
         voucherOrder.setVoucherId(voucherId);
         voucherOrder.setId(redisClient.nextId(RedisConstants.SECKILL_GEN_ID_KEY));
-        orderTasks.add(voucherOrder);
-        proxy  = (IVoucherOrderService) AopContext.currentProxy();
+//        orderTasks.add(voucherOrder);
+        String queueName = "dianping.seckill";
+        rabbitTemplate.convertAndSend(queueName, voucherOrder);
+
         return Result.ok(voucherOrder.getId());
 
 //        // synchronized 锁不住后端集群
@@ -175,10 +218,12 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     public void createVoucherOrder(VoucherOrder voucherOrder) {
         log.info("开始生成订单.");
         // 一人一单
+        // 兜底
         Long voucherId = voucherOrder.getVoucherId();
         int count = query().eq("voucher_id",voucherId).eq("user_id", voucherOrder.getUserId()).count();
         if (count > 0) {
             log.info("用户已经到达下单上限.");
+//            return;
         }
         // 扣减库存
         boolean buySeccuss = seckillVoucherService.update()
@@ -188,6 +233,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
                 .update();
         if (!buySeccuss) {
             log.error("扣库存失败.");
+//            return ;
         }
         //下单
         save(voucherOrder);
